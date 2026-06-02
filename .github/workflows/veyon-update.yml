@@ -148,7 +148,8 @@ jobs:
           echo "${{ steps.get_rpm.outputs.version }}" > last_version.txt
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git pull --rebase origin main
+          git fetch origin main --tags
+          git rebase origin/main
           git add last_version.txt
           git commit -m "Automated update: Veyon version to ${{ steps.get_rpm.outputs.version }}"
           git push
