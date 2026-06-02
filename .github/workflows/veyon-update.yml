@@ -67,7 +67,7 @@ jobs:
                 # We are going through all the RPM URLs and submitting them to Copr
                 for url in ${{ steps.get_rpm.outputs.rpm_urls }}; do
                     echo "Submitting $url to Copr"
-                    copr-cli buildfromurl --project "${{ secrets.COPR_USERNAME }}/eduos-copr" "$url"
+                    copr-cli build "${{ secrets.COPR_USERNAME }}/eduos-copr" "$url"
                 done
             
             # Saving the latest processed version to a file for future reference
