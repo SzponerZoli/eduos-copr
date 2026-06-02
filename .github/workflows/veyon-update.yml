@@ -22,13 +22,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Clone only the main repo first to grab tags quickly
-          git clone --filter=blob:none --quiet https://github.com/veyon/veyon.git veyon_tags
-          cd veyon_tags
-          LATEST_TAG=$(git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags | head -n 1)
+          # Query remote tags, sort them, and grab the latest one
+          LATEST_TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/veyon/veyon.git | head -n 1 | awk -F'/' '{print $3}')
+          
+          # Clean the version number (remove the 'v' prefix if exists)
           VERSION=${LATEST_TAG#v}
-          cd ..
-          rm -rf veyon_tags
 
           echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
