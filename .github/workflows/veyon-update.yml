@@ -19,12 +19,12 @@ jobs:
                 RELEASE_JSON=$(curl -s https://api.github.com/repos/veyon/veyon/releases/latest)
 
                 # Extracting the versions (eg. v4.10.3.0)
-                VERSION=$(echo "$RELEASE_JSON" | grep '"tag_name":' | sed 's/.*"([^"]*\)".*/\1/')
+                VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
                 echo "version=$VERSION" >> $GITHUB_OUTPUT
 
                 # Extracting all URLs that have 'fedora' and '.rpm' in their name
                 # We collect the URLs in an array separated with spaces
-                RPM_URLS=$(echo "$RELEASE_JSON" | grep '"browser_download_url":' | grep -i 'fedora' | grep '\.rpm' | sed 's/.*"\(.*\)".*/\1/' | tr' '\n' ' ')
+                RPM_URLS=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.browser_download_url | test("fedora"; "i") and test("\\.rpm$")) | .browser_download_url' | tr '\n' ' ')
                 echo "rpm_urls=$RPM_URLS" >> $GITHUB_OUTPUT
             
             # Check if the version already exists in Copr
@@ -34,11 +34,11 @@ jobs:
                 touch last_version.txt
                 CURRENT_RECORD=$(cat last_version.txt)
 
-                if ["CURRENT_RECORD" != "${{ steps.get_rpm.outputs.version}}"]; then
-                    echo "new_version_found=true" >> $GITHUB_OUTPUT
-                else
-                    echo "new_version_found=false" >> $GITHUB_OUTPUT
-                fi
+                if [ "$CURRENT_RECORD" != "${{ steps.get_rpm.outputs.version }}" ]; then
+                        echo "new_version_found=true" >> $GITHUB_OUTPUT
+                    else
+                        echo "new_version_found=false" >> $GITHUB_OUTPUT
+                    fi
             
             # Installing Copr CLI
             - name: Install Copr CLI
