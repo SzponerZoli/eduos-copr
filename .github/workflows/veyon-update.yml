@@ -104,39 +104,40 @@ jobs:
           URL:            https://veyon.io
           Source0:        veyon-{source_version}-src.tar.gz
 
-          # Core Build Tools
-          BuildRequires:  cmake
-          BuildRequires:  ninja-build
-          BuildRequires:  gcc-c++
-          BuildRequires:  make
-          BuildRequires:  desktop-file-utils
-          BuildRequires:  systemd-rpm-macros
-          BuildRequires:  rpm-build
+            # Core Build Tools
+                    BuildRequires:  cmake
+                    BuildRequires:  ninja-build
+                    BuildRequires:  gcc-c++
+                    BuildRequires:  make
+                    BuildRequires:  desktop-file-utils
+                    BuildRequires:  systemd-rpm-macros
+                    BuildRequires:  rpm-build
 
-          # Requirements verified from official Veyon documentation
-          BuildRequires:  qt5-qtbase-devel
-          BuildRequires:  qt5-qtbase-private-devel
-          BuildRequires:  qt5-qtx11extras-devel
-          BuildRequires:  qt5-qttools-devel
-          BuildRequires:  qt5-qtquickcontrols2-devel
-          BuildRequires:  qca-devel
-          BuildRequires:  qca-qt5-devel
-          BuildRequires:  libXtst-devel
-          BuildRequires:  libXrandr-devel
-          BuildRequires:  libXinerama-devel
-          BuildRequires:  libXcursor-devel
-          BuildRequires:  libXdamage-devel
-          BuildRequires:  libXcomposite-devel
-          BuildRequires:  libXfixes-devel
-          BuildRequires:  libfakekey-devel
-          BuildRequires:  libjpeg-turbo-devel
-          BuildRequires:  zlib-devel
-          BuildRequires:  openssl-devel
-          BuildRequires:  pam-devel
-          BuildRequires:  procps-devel
-          BuildRequires:  lzo-devel
-          BuildRequires:  openldap-devel
-          BuildRequires:  cyrus-sasl-devel
+                    # Requirements verified from official Veyon documentation
+                    BuildRequires:  qt5-qtbase-devel
+                    BuildRequires:  qt5-qtbase-private-devel
+                    BuildRequires:  qt5-qtx11extras-devel
+                    BuildRequires:  qt5-qttools-devel
+                    BuildRequires:  qt5-qtquickcontrols2-devel
+                    # Standard Fedora packages for Qt5 QCA:
+                    BuildRequires:  qca-qt5-devel
+                    BuildRequires:  qca-qt5-plugins-ossl
+                    BuildRequires:  libXtst-devel
+                    BuildRequires:  libXrandr-devel
+                    BuildRequires:  libXinerama-devel
+                    BuildRequires:  libXcursor-devel
+                    BuildRequires:  libXdamage-devel
+                    BuildRequires:  libXcomposite-devel
+                    BuildRequires:  libXfixes-devel
+                    BuildRequires:  libfakekey-devel
+                    BuildRequires:  libjpeg-turbo-devel
+                    BuildRequires:  zlib-devel
+                    BuildRequires:  openssl-devel
+                    BuildRequires:  pam-devel
+                    BuildRequires:  procps-devel
+                    BuildRequires:  lzo-devel
+                    BuildRequires:  openldap-devel
+                    BuildRequires:  cyrus-sasl-devel
 
           %description
           Veyon is a free and open source software for monitoring and controlling computers across multiple platforms.
