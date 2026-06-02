@@ -110,7 +110,7 @@ jobs:
                 BuildRequires:  ninja-build
                 BuildRequires:  gcc-c++
                 BuildRequires:  make
-                desktop-file-utils
+                BuildRequires:  desktop-file-utils
                 BuildRequires:  systemd-rpm-macros
                 BuildRequires:  rpm-build
                 BuildRequires:  qt5-qtbase-devel
