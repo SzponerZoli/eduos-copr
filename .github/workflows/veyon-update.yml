@@ -15,14 +15,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-# 1. Find the chronologically latest release tag directly from remote
+# 1. Find the chronologically latest STABLE release tag directly from remote
       - name: Get latest Veyon tag
         id: get_rpm
         run: |
           set -euo pipefail
 
-          # Query remote tags, filter out dereferenced pointers, and get the chronologically newest tag
-          LATEST_TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/veyon/veyon.git | grep -v '\^{}' | sed -n '1p' | awk -F'/' '{print $3}')
+          # Query remote tags, filter out dereferences, pre-releases, and experimental versions (like 4.99)
+          LATEST_TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/veyon/veyon.git | \
+            grep -v '\^{}' | \
+            grep -v -E '(alpha|beta|rc|pre|4\.99)' | \
+            sed -n '1p' | \
+            awk -F'/' '{print $3}')
           
           # Clean the version number (remove the 'v' prefix if exists)
           VERSION=${LATEST_TAG#v}
