@@ -66,114 +66,114 @@ jobs:
                   username = ${{ secrets.COPR_USERNAME }}
                   login = ${{ secrets.COPR_LOGIN }}
                   token = ${{ secrets.COPR_TOKEN }}
-                  EOF
+                        EOF
 
-            # 5. Prepare the RPM build tree, generate the .spec file, and submit the SRPM
+        # 5. Prepare the RPM build tree, generate the .spec file, and submit the SRPM
             - name: Build and submit SRPM to Copr
               if: steps.cache_check.outputs.new_version_found == 'true'
               run: |
-                  set -euo pipefail
+                set -euo pipefail
 
-                  WORKDIR=$(mktemp -d)
-                  trap 'rm -rf "$WORKDIR"' EXIT
+                WORKDIR=$(mktemp -d)
+                trap 'rm -rf "$WORKDIR"' EXIT
 
-                  # Create the standard rpmbuild directory structure
-                  mkdir -p "$WORKDIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+                # Create the standard rpmbuild directory structure
+                mkdir -p "$WORKDIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
-                  # Clone recursively to fetch all inner submodules required by Veyon
-                  git clone --recursive --branch "${{ steps.get_rpm.outputs.tag }}" --depth 1 https://github.com/veyon/veyon.git "$WORKDIR/veyon-${{ steps.get_rpm.outputs.version }}"
+                # Clone recursively to fetch all inner submodules required by Veyon
+                git clone --recursive --branch "${{ steps.get_rpm.outputs.tag }}" --depth 1 https://github.com/veyon/veyon.git "$WORKDIR/veyon-${{ steps.get_rpm.outputs.version }}"
+                
+                # Package the source code along with submodules using standard tar
+                cd "$WORKDIR"
+                tar --exclude-vcs -czf "rpmbuild/SOURCES/veyon-${{ steps.get_rpm.outputs.version }}-src.tar.gz" "veyon-${{ steps.get_rpm.outputs.version }}"
 
-                  # Package the source code along with submodules using standard tar
-                  cd "$WORKDIR"
-                  tar --exclude-vcs -czf "rpmbuild/SOURCES/veyon-${{ steps.get_rpm.outputs.version }}-src.tar.gz" "veyon-${{ steps.get_rpm.outputs.version }}"
+                # Inline Python script to dynamically generate a clean, correctly formatted .spec file
+                SPEC_PATH="$WORKDIR/rpmbuild/SPECS/veyon.spec" SOURCE_VERSION="${{ steps.get_rpm.outputs.version }}" python3 - <<'PY'
+                from pathlib import Path
+                import os
+                import textwrap
 
-                  # Inline Python script to dynamically generate a clean, correctly formatted .spec file
-                  SPEC_PATH="$WORKDIR/rpmbuild/SPECS/veyon.spec" SOURCE_VERSION="${{ steps.get_rpm.outputs.version }}" python3 - <<'PY'
-                  from pathlib import Path
-                  import os
-                  import textwrap
+                spec_path = Path(os.environ["SPEC_PATH"])
+                source_version = os.environ["SOURCE_VERSION"]
 
-                  spec_path = Path(os.environ["SPEC_PATH"])
-                  source_version = os.environ["SOURCE_VERSION"]
+                # Spec block formatted flat against the left margin to guarantee no invalid spaces
+                spec = textwrap.dedent(f"""\
+                Name:           veyon
+                Version:        {source_version}
+                Release:        1%{{?dist}}
+                Summary:        Virtual Eye On Networks classroom management
+                License:        GPL-2.0-only
+                URL:            https://veyon.io
+                Source0:        veyon-{source_version}-src.tar.gz
 
-                  # Spec block formatted flat against the left margin to guarantee no invalid spaces
-                  spec = textwrap.dedent(f"""\
-                  Name:           veyon
-                  Version:        {source_version}
-                  Release:        1%{{?dist}}
-                  Summary:        Virtual Eye On Networks classroom management
-                  License:        GPL-2.0-only
-                  URL:            https://veyon.io
-                  Source0:        veyon-{source_version}-src.tar.gz
+                BuildRequires:  cmake
+                BuildRequires:  ninja-build
+                BuildRequires:  gcc-c++
+                BuildRequires:  make
+                desktop-file-utils
+                BuildRequires:  systemd-rpm-macros
+                BuildRequires:  rpm-build
+                BuildRequires:  qt5-qtbase-devel
+                BuildRequires:  qt5-qtbase-private-devel
+                BuildRequires:  qt5-qtx11extras-devel
+                BuildRequires:  qt5-qttools-devel
+                BuildRequires:  qt5-qtquickcontrols2-devel
+                BuildRequires:  qca-qt5-devel
+                BuildRequires:  qca-qt5-ossl
+                BuildRequires:  libXtst-devel
+                BuildRequires:  libXrandr-devel
+                BuildRequires:  libXinerama-devel
+                BuildRequires:  libXcursor-devel
+                BuildRequires:  libXdamage-devel
+                BuildRequires:  libXcomposite-devel
+                BuildRequires:  libXfixes-devel
+                BuildRequires:  libfakekey-devel
+                BuildRequires:  libjpeg-turbo-devel
+                BuildRequires:  zlib-devel
+                BuildRequires:  openssl-devel
+                BuildRequires:  pam-devel
+                BuildRequires:  procps-devel
+                BuildRequires:  lzo-devel
+                BuildRequires:  openldap-devel
+                BuildRequires:  cyrus-sasl-devel
 
-                  BuildRequires:  cmake
-                  BuildRequires:  ninja-build
-                  BuildRequires:  gcc-c++
-                  BuildRequires:  make
-                  BuildRequires:  desktop-file-utils
-                  BuildRequires:  systemd-rpm-macros
-                  BuildRequires:  rpm-build
-                  BuildRequires:  qt5-qtbase-devel
-                  BuildRequires:  qt5-qtbase-private-devel
-                  BuildRequires:  qt5-qtx11extras-devel
-                  BuildRequires:  qt5-qttools-devel
-                  BuildRequires:  qt5-qtquickcontrols2-devel
-                  BuildRequires:  qca-qt5-devel
-                  BuildRequires:  qca-qt5-plugins-ossl
-                  BuildRequires:  libXtst-devel
-                  BuildRequires:  libXrandr-devel
-                  BuildRequires:  libXinerama-devel
-                  BuildRequires:  libXcursor-devel
-                  BuildRequires:  libXdamage-devel
-                  BuildRequires:  libXcomposite-devel
-                  BuildRequires:  libXfixes-devel
-                  BuildRequires:  libfakekey-devel
-                  BuildRequires:  libjpeg-turbo-devel
-                  BuildRequires:  zlib-devel
-                  BuildRequires:  openssl-devel
-                  BuildRequires:  pam-devel
-                  BuildRequires:  procps-devel
-                  BuildRequires:  lzo-devel
-                  BuildRequires:  openldap-devel
-                  BuildRequires:  cyrus-sasl-devel
+                %description
+                Veyon is a free and open source software for monitoring and controlling computers across multiple platforms.
 
-                  %description
-                  Veyon is a free and open source software for monitoring and controlling computers across multiple platforms.
+                %prep
+                %autosetup -n veyon-{source_version}
 
-                  %prep
-                  %autosetup -n veyon-{source_version}
-
-                  %build
-                  %cmake -G Ninja \\
+                %build
+                %cmake -G Ninja \\
                     -DCMAKE_INSTALL_PREFIX=%{{_prefix}} \\
                     -DSYSTEMD_SERVICE_INSTALL_DIR=%{{_unitdir}} \\
                     -DWITH_QT6=OFF
-                  %cmake_build
+                %cmake_build
 
-                  %install
-                  %cmake_install
+                %install
+                %cmake_install
 
-                  %files
-                  %license COPYING
-                  %doc README.md
-                  %{{_prefix}}/*
-                  %{{_unitdir}}/veyon.service
-                  %config(noreplace) %{{_sysconfdir}}/xdg/Veyon.conf
+                %files
+                %license COPYING
+                %doc README.md
+                %{{_prefix}}/*
+                %{{_unitdir}}/veyon.service
+                %config(noreplace) %{{_sysconfdir}}/xdg/Veyon.conf
 
-                  %changelog
-                  * Tue Jun 02 2026 GitHub Actions <actions@github.com> - {source_version}-1
-                  - Automated build from latest created git tag with full submodules
-                  """)
-                  spec_path.write_text(spec)
-                  PY
+                %changelog
+                * Tue Jun 02 2026 GitHub Actions <actions@github.com> - {source_version}-1
+                - Automated build from latest created git tag with full submodules
+                """)
+                spec_path.write_text(spec)
+                PY
 
-                  # Build the Source RPM (SRPM)
-                  rpmbuild --define "_topdir $WORKDIR/rpmbuild" -bs "$WORKDIR/rpmbuild/SPECS/veyon.spec"
-
-                  # Find the generated SRPM file and submit it to Copr
-                  SRPM=$(find "$WORKDIR/rpmbuild/SRPMS" -name '*.src.rpm' -print -quit)
-                  echo "Submitting $SRPM to Copr"
-                  copr-cli build --nowait "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
+                # Build the Source RPM (SRPM)
+                rpmbuild --define "_topdir $WORKDIR/rpmbuild" -bs "$WORKDIR/rpmbuild/SPECS/veyon.spec"
+                
+                # Find the generated SRPM file and submit it to Copr
+                SRPM=$(find "$WORKDIR/rpmbuild/SRPMS" -name '*.src.rpm' -print -quit)
+                echo "Submitting $SRPM to Copr"
+                copr-cli build --nowait "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
             # 6. Commit the updated version record back to the repository
             - name: Update version record
               if: steps.cache_check.outputs.new_version_found == 'true'
