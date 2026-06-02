@@ -1,0 +1,82 @@
+name: Push official Veyon RPMs to Copr
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight
+  workflow_dispatch: # Allows manual triggering of the workflow
+
+jobs:
+    check-and-deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            # Fetching the latest release and extracting all Fedora RPMs
+            - name: Get latest Veyon RPM URLs
+              id: get_rpm
+              run: |
+                # Fetching the latest release JSON from GitHub API
+                RELEASE_JSON=$(curl -s https://api.github.com/repos/veyon/veyon/releases/latest)
+
+                # Extracting the versions (eg. v4.10.3.0)
+                VERSION=$(echo "$RELEASE_JSON" | grep '"tag_name":' | sed 's/.*"([^"]*\)".*/\1/')
+                echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+                # Extracting all URLs that have 'fedora' and '.rpm' in their name
+                # We collect the URLs in an array separated with spaces
+                RPM_URLS=$(echo "$RELEASE_JSON" | grep '"browser_download_url":' | grep -i 'fedora' | grep '\.rpm' | sed 's/.*"\(.*\)".*/\1/' | tr' '\n' ' ')
+                echo "rpm_urls=$RPM_URLS" >> $GITHUB_OUTPUT
+            
+            # Check if the version already exists in Copr
+            - name: Check if already processed
+              id: cache_check
+              run: |
+                touch last_version.txt
+                CURRENT_RECORD=$(cat last_version.txt)
+
+                if ["CURRENT_RECORD" != "${{ steps.get_rpm.outputs.version}}"]; then
+                    echo "new_version_found=true" >> $GITHUB_OUTPUT
+                else
+                    echo "new_version_found=false" >> $GITHUB_OUTPUT
+                fi
+            
+            # Installing Copr CLI
+            - name: Install Copr CLI
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y python3-pip
+                pip3 install copr-cli
+
+            # Setting up Copr authentication from Github Secrets
+            - name: Setup Copr Config
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                    mkdir -p ~/.config/
+                    cat <<EOF > ~/.config/copr
+                    [copr-cli]
+                    copr_url = https://copr.fedorainfracloud.org
+                    username = ${{ secrets.COPR_USERNAME }}
+                    login = ${{ secrets.COPR_LOGIN }}
+                    token = ${{ secrets.COPR_TOKEN }}
+                    EOF
+            # Submit all new RPMs to Copr
+            - name: Submit to Copr
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                # We are going through all the RPM URLs and submitting them to Copr
+                for url in ${{ steps.get_rpm.outputs.rpm_urls }}; do
+                    echo "Submitting $url to Copr"
+                    copr-cli buildfromurl --project "${{ secrets.COPR_USERNAME }}/veyon" "$url"
+                done
+            
+            # Saving the latest processed version to a file for future reference
+            - name: Update version record
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                echo "${{ steps.get_rpm.outputs.version }}" > last_version.txt
+                git config user.name "github-actions"
+                git config user.email "actions@github.com"
+                git add last_version.txt
+                git commit -m "Auromated update: Veyon version to ${{ steps.get_rpm.outputs.version }}"
+                git push
