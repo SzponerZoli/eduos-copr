@@ -138,7 +138,7 @@ jobs:
           rpmbuild --define "_topdir $WORKDIR/rpmbuild" -bs "$WORKDIR/rpmbuild/SPECS/veyon.spec"
           SRPM=$(find "$WORKDIR/rpmbuild/SRPMS" -name '*.src.rpm' -print -quit)
           echo "Submitting $SRPM to Copr"
-          copr-cli build "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
+          copr-cli build --nowait "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
 
       - name: Update version record
         if: steps.cache_check.outputs.new_version_found == 'true'
