@@ -16,6 +16,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # 1. Clone the repository and find the latest release tag
       - name: Get latest Veyon tag
         id: get_rpm
         run: |
@@ -30,6 +31,7 @@ jobs:
           echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # 2. Compare the latest version with our local record
       - name: Check if already processed
         id: cache_check
         run: |
@@ -42,6 +44,7 @@ jobs:
             echo "new_version_found=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # 3. Install required build and deployment utilities
       - name: Install download tools
         if: steps.cache_check.outputs.new_version_found == 'true'
         run: |
@@ -49,6 +52,7 @@ jobs:
           sudo apt-get install -y git python3-pip rpm
           pip3 install copr-cli
 
+      # 4. Generate the Copr CLI configuration from GitHub Secrets
       - name: Setup Copr Config
         if: steps.cache_check.outputs.new_version_found == 'true'
         run: |
@@ -61,6 +65,7 @@ jobs:
           token = ${{ secrets.COPR_TOKEN }}
           EOF
 
+      # 5. Prepare the RPM build tree, generate the .spec file, and submit the SRPM
       - name: Build and submit SRPM to Copr
         if: steps.cache_check.outputs.new_version_found == 'true'
         run: |
@@ -69,13 +74,16 @@ jobs:
           WORKDIR=$(mktemp -d)
           trap 'rm -rf "$WORKDIR"' EXIT
 
+          # Create the standard rpmbuild directory structure
           mkdir -p "$WORKDIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
           git clone --filter=blob:none --quiet --branch "${{ steps.get_rpm.outputs.tag }}" --depth 1 https://github.com/veyon/veyon.git "$WORKDIR/veyon"
           cd "$WORKDIR/veyon"
 
+          # Package the source code into a tarball
           git archive --format=tar.gz --prefix="veyon-${{ steps.get_rpm.outputs.version }}/" "${{ steps.get_rpm.outputs.tag }}" > "$WORKDIR/rpmbuild/SOURCES/veyon-${{ steps.get_rpm.outputs.version }}-src.tar.gz"
 
+          # Inline Python script to dynamically generate a clean .spec file
           SPEC_PATH="$WORKDIR/rpmbuild/SPECS/veyon.spec" SOURCE_VERSION="${{ steps.get_rpm.outputs.version }}" python3 - <<'PY'
           from pathlib import Path
           import os
@@ -110,6 +118,8 @@ jobs:
           BuildRequires:  libpng-devel
           BuildRequires:  lzo-devel
           BuildRequires:  zlib-devel
+          BuildRequires:  libfakekey-devel
+          BuildRequires:  procps-ng-devel
 
           %description
           Veyon is a free and open source software for monitoring and controlling computers across multiple platforms.
@@ -128,7 +138,11 @@ jobs:
 
           %files
           %license COPYING
-          %doc INSTALL
+          %doc README.md
+          # Match all packaged files to avoid unpacking errors
+          %{{_prefix}}/*
+          %{{_unitdir}}/veyon.service
+          %config(noreplace) %{{_sysconfdir}}/xdg/Veyon.conf
 
           %changelog
           * Tue Jun 02 2026 GitHub Actions <actions@github.com> - {source_version}-1
@@ -137,11 +151,15 @@ jobs:
           spec_path.write_text(spec)
           PY
 
+          # Build the Source RPM (SRPM)
           rpmbuild --define "_topdir $WORKDIR/rpmbuild" -bs "$WORKDIR/rpmbuild/SPECS/veyon.spec"
+          
+          # Find the generated SRPM file and submit it to Copr
           SRPM=$(find "$WORKDIR/rpmbuild/SRPMS" -name '*.src.rpm' -print -quit)
           echo "Submitting $SRPM to Copr"
           copr-cli build --nowait "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
 
+      # 6. Commit the updated version record back to the repository
       - name: Update version record
         if: steps.cache_check.outputs.new_version_found == 'true'
         run: |
