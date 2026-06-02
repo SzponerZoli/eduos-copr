@@ -1,194 +1,188 @@
 name: Publish official Veyon RPMs
 
 on:
-  schedule:
-    - cron: '0 0 * * *' # Runs daily at midnight
-  workflow_dispatch: # Allows manual triggering of the workflow
+    schedule:
+        - cron: "0 0 * * *" # Runs daily at midnight
+    workflow_dispatch: # Allows manual triggering of the workflow
 
 permissions:
-  contents: write
+    contents: write
 
 jobs:
-  check-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-# 1. Find the chronologically latest STABLE release tag directly from remote
-      - name: Get latest Veyon tag
-        id: get_rpm
-        run: |
-          set -euo pipefail
+    check-and-deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            # 1. Find the chronologically latest STABLE release tag directly from remote
+            - name: Get latest Veyon tag
+              id: get_rpm
+              run: |
+                  set -euo pipefail
 
-          # Query remote tags, filter out dereferences, pre-releases, and experimental versions (like 4.99)
-          LATEST_TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/veyon/veyon.git | \
-            grep -v '\^{}' | \
-            grep -v -E '(alpha|beta|rc|pre|4\.99)' | \
-            sed -n '1p' | \
-            awk -F'/' '{print $3}')
-          
-          # Clean the version number (remove the 'v' prefix if exists)
-          VERSION=${LATEST_TAG#v}
+                  # Query remote tags, filter out dereferences, pre-releases, and experimental versions (like 4.99)
+                  LATEST_TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/veyon/veyon.git | \
+                    grep -v '\^{}' | \
+                    grep -v -E '(alpha|beta|rc|pre|4\.99)' | \
+                    sed -n '1p' | \
+                    awk -F'/' '{print $3}')
 
-          echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+                  # Clean the version number (remove the 'v' prefix if exists)
+                  VERSION=${LATEST_TAG#v}
 
-      # 2. Compare the latest version with our local record
-      - name: Check if already processed
-        id: cache_check
-        run: |
-          touch last_version.txt
-          CURRENT_RECORD=$(cat last_version.txt)
+                  echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-          if [ "$CURRENT_RECORD" != "${{ steps.get_rpm.outputs.version }}" ]; then
-            echo "new_version_found=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "new_version_found=false" >> "$GITHUB_OUTPUT"
-          fi
+            # 2. Compare the latest version with our local record
+            - name: Check if already processed
+              id: cache_check
+              run: |
+                  touch last_version.txt
+                  CURRENT_RECORD=$(cat last_version.txt)
 
-      # 3. Install required build and deployment utilities
-      - name: Install download tools
-        if: steps.cache_check.outputs.new_version_found == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git python3-pip rpm
-          pip3 install copr-cli
+                  if [ "$CURRENT_RECORD" != "${{ steps.get_rpm.outputs.version }}" ]; then
+                    echo "new_version_found=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "new_version_found=false" >> "$GITHUB_OUTPUT"
+                  fi
 
-      # 4. Generate the Copr CLI configuration from GitHub Secrets
-      - name: Setup Copr Config
-        if: steps.cache_check.outputs.new_version_found == 'true'
-        run: |
-          mkdir -p ~/.config/
-          cat <<EOF > ~/.config/copr
-          [copr-cli]
-          copr_url = https://copr.fedorainfracloud.org
-          username = ${{ secrets.COPR_USERNAME }}
-          login = ${{ secrets.COPR_LOGIN }}
-          token = ${{ secrets.COPR_TOKEN }}
-          EOF
+            # 3. Install required build and deployment utilities
+            - name: Install download tools
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y git python3-pip rpm
+                  pip3 install copr-cli
 
-      # 5. Prepare the RPM build tree, generate the .spec file, and submit the SRPM
-      - name: Build and submit SRPM to Copr
-        if: steps.cache_check.outputs.new_version_found == 'true'
-        run: |
-          set -euo pipefail
+            # 4. Generate the Copr CLI configuration from GitHub Secrets
+            - name: Setup Copr Config
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                  mkdir -p ~/.config/
+                  cat <<EOF > ~/.config/copr
+                  [copr-cli]
+                  copr_url = https://copr.fedorainfracloud.org
+                  username = ${{ secrets.COPR_USERNAME }}
+                  login = ${{ secrets.COPR_LOGIN }}
+                  token = ${{ secrets.COPR_TOKEN }}
+                  EOF
 
-          WORKDIR=$(mktemp -d)
-          trap 'rm -rf "$WORKDIR"' EXIT
+            # 5. Prepare the RPM build tree, generate the .spec file, and submit the SRPM
+            - name: Build and submit SRPM to Copr
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                  set -euo pipefail
 
-          # Create the standard rpmbuild directory structure
-          mkdir -p "$WORKDIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+                  WORKDIR=$(mktemp -d)
+                  trap 'rm -rf "$WORKDIR"' EXIT
 
-          # CRITICAL: Clone recursively to fetch all inner submodules required by Veyon
-          git clone --recursive --branch "${{ steps.get_rpm.outputs.tag }}" --depth 1 https://github.com/veyon/veyon.git "$WORKDIR/veyon-${{ steps.get_rpm.outputs.version }}"
-          
-          # Package the source code along with submodules using standard tar
-          cd "$WORKDIR"
-          tar --exclude-vcs -czf "rpmbuild/SOURCES/veyon-${{ steps.get_rpm.outputs.version }}-src.tar.gz" "veyon-${{ steps.get_rpm.outputs.version }}"
+                  # Create the standard rpmbuild directory structure
+                  mkdir -p "$WORKDIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
-          # Inline Python script to dynamically generate a clean .spec file
-          SPEC_PATH="$WORKDIR/rpmbuild/SPECS/veyon.spec" SOURCE_VERSION="${{ steps.get_rpm.outputs.version }}" python3 - <<'PY'
-          from pathlib import Path
-          import os
-          import textwrap
+                  # Clone recursively to fetch all inner submodules required by Veyon
+                  git clone --recursive --branch "${{ steps.get_rpm.outputs.tag }}" --depth 1 https://github.com/veyon/veyon.git "$WORKDIR/veyon-${{ steps.get_rpm.outputs.version }}"
 
-          spec_path = Path(os.environ["SPEC_PATH"])
-          source_version = os.environ["SOURCE_VERSION"]
+                  # Package the source code along with submodules using standard tar
+                  cd "$WORKDIR"
+                  tar --exclude-vcs -czf "rpmbuild/SOURCES/veyon-${{ steps.get_rpm.outputs.version }}-src.tar.gz" "veyon-${{ steps.get_rpm.outputs.version }}"
 
-          spec = textwrap.dedent(f"""\
-          Name:           veyon
-          Version:        {source_version}
-          Release:        1%{{?dist}}
-          Summary:        Virtual Eye On Networks classroom management
-          License:        GPL-2.0-only
-          URL:            https://veyon.io
-          Source0:        veyon-{source_version}-src.tar.gz
+                  # Inline Python script to dynamically generate a clean, correctly formatted .spec file
+                  SPEC_PATH="$WORKDIR/rpmbuild/SPECS/veyon.spec" SOURCE_VERSION="${{ steps.get_rpm.outputs.version }}" python3 - <<'PY'
+                  from pathlib import Path
+                  import os
+                  import textwrap
 
-            # Core Build Tools
-                    BuildRequires:  cmake
-                    BuildRequires:  ninja-build
-                    BuildRequires:  gcc-c++
-                    BuildRequires:  make
-                    BuildRequires:  desktop-file-utils
-                    BuildRequires:  systemd-rpm-macros
-                    BuildRequires:  rpm-build
+                  spec_path = Path(os.environ["SPEC_PATH"])
+                  source_version = os.environ["SOURCE_VERSION"]
 
-                    # Requirements verified from official Veyon documentation
-                    BuildRequires:  qt5-qtbase-devel
-                    BuildRequires:  qt5-qtbase-private-devel
-                    BuildRequires:  qt5-qtx11extras-devel
-                    BuildRequires:  qt5-qttools-devel
-                    BuildRequires:  qt5-qtquickcontrols2-devel
-                    # Standard Fedora packages for Qt5 QCA:
-                    BuildRequires:  qca-qt5-devel
-                    BuildRequires:  qca-qt5-plugins-ossl
-                    BuildRequires:  libXtst-devel
-                    BuildRequires:  libXrandr-devel
-                    BuildRequires:  libXinerama-devel
-                    BuildRequires:  libXcursor-devel
-                    BuildRequires:  libXdamage-devel
-                    BuildRequires:  libXcomposite-devel
-                    BuildRequires:  libXfixes-devel
-                    BuildRequires:  libfakekey-devel
-                    BuildRequires:  libjpeg-turbo-devel
-                    BuildRequires:  zlib-devel
-                    BuildRequires:  openssl-devel
-                    BuildRequires:  pam-devel
-                    BuildRequires:  procps-devel
-                    BuildRequires:  lzo-devel
-                    BuildRequires:  openldap-devel
-                    BuildRequires:  cyrus-sasl-devel
+                  # Spec block formatted flat against the left margin to guarantee no invalid spaces
+                  spec = textwrap.dedent(f"""\
+                  Name:           veyon
+                  Version:        {source_version}
+                  Release:        1%{{?dist}}
+                  Summary:        Virtual Eye On Networks classroom management
+                  License:        GPL-2.0-only
+                  URL:            https://veyon.io
+                  Source0:        veyon-{source_version}-src.tar.gz
 
-          %description
-          Veyon is a free and open source software for monitoring and controlling computers across multiple platforms.
+                  BuildRequires:  cmake
+                  BuildRequires:  ninja-build
+                  BuildRequires:  gcc-c++
+                  BuildRequires:  make
+                  BuildRequires:  desktop-file-utils
+                  BuildRequires:  systemd-rpm-macros
+                  BuildRequires:  rpm-build
+                  BuildRequires:  qt5-qtbase-devel
+                  BuildRequires:  qt5-qtbase-private-devel
+                  BuildRequires:  qt5-qtx11extras-devel
+                  BuildRequires:  qt5-qttools-devel
+                  BuildRequires:  qt5-qtquickcontrols2-devel
+                  BuildRequires:  qca-qt5-devel
+                  BuildRequires:  qca-qt5-plugins-ossl
+                  BuildRequires:  libXtst-devel
+                  BuildRequires:  libXrandr-devel
+                  BuildRequires:  libXinerama-devel
+                  BuildRequires:  libXcursor-devel
+                  BuildRequires:  libXdamage-devel
+                  BuildRequires:  libXcomposite-devel
+                  BuildRequires:  libXfixes-devel
+                  BuildRequires:  libfakekey-devel
+                  BuildRequires:  libjpeg-turbo-devel
+                  BuildRequires:  zlib-devel
+                  BuildRequires:  openssl-devel
+                  BuildRequires:  pam-devel
+                  BuildRequires:  procps-devel
+                  BuildRequires:  lzo-devel
+                  BuildRequires:  openldap-devel
+                  BuildRequires:  cyrus-sasl-devel
 
-          %prep
-          %autosetup -n veyon-{source_version}
+                  %description
+                  Veyon is a free and open source software for monitoring and controlling computers across multiple platforms.
 
-          %build
-          # Configure according to standard RPM guidelines and enforce Qt5 path
-          %cmake -G Ninja \
-            -DCMAKE_INSTALL_PREFIX=%{{_prefix}} \
-            -DSYSTEMD_SERVICE_INSTALL_DIR=%{{_unitdir}} \
-            -DWITH_QT6=OFF
-          %cmake_build
+                  %prep
+                  %autosetup -n veyon-{source_version}
 
-          %install
-          %cmake_install
+                  %build
+                  %cmake -G Ninja \\
+                    -DCMAKE_INSTALL_PREFIX=%{{_prefix}} \\
+                    -DSYSTEMD_SERVICE_INSTALL_DIR=%{{_unitdir}} \\
+                    -DWITH_QT6=OFF
+                  %cmake_build
 
-          %files
-          %license COPYING
-          %doc README.md
-          # Catch all binaries, libraries, icons, desktop files and service configurations safely
-          %{{_prefix}}/*
-          %{{_unitdir}}/veyon.service
-          %config(noreplace) %{{_sysconfdir}}/xdg/Veyon.conf
+                  %install
+                  %cmake_install
 
-          %changelog
-          * Tue Jun 02 2026 GitHub Actions <actions@github.com> - {source_version}-1
-          - Automated build from latest created git tag with full submodules
-          """)
-          spec_path.write_text(spec)
-          PY
+                  %files
+                  %license COPYING
+                  %doc README.md
+                  %{{_prefix}}/*
+                  %{{_unitdir}}/veyon.service
+                  %config(noreplace) %{{_sysconfdir}}/xdg/Veyon.conf
 
-          # Build the Source RPM (SRPM)
-          rpmbuild --define "_topdir $WORKDIR/rpmbuild" -bs "$WORKDIR/rpmbuild/SPECS/veyon.spec"
-          
-          # Find the generated SRPM file and submit it to Copr
-          SRPM=$(find "$WORKDIR/rpmbuild/SRPMS" -name '*.src.rpm' -print -quit)
-          echo "Submitting $SRPM to Copr"
-          copr-cli build --nowait "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
+                  %changelog
+                  * Tue Jun 02 2026 GitHub Actions <actions@github.com> - {source_version}-1
+                  - Automated build from latest created git tag with full submodules
+                  """)
+                  spec_path.write_text(spec)
+                  PY
 
-      # 6. Commit the updated version record back to the repository
-      - name: Update version record
-        if: steps.cache_check.outputs.new_version_found == 'true'
-        run: |
-          echo "${{ steps.get_rpm.outputs.version }}" > last_version.txt
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git fetch origin main --tags
-          git rebase origin/main
-          git add last_version.txt
-          git commit -m "Automated update: Veyon version to ${{ steps.get_rpm.outputs.version }}"
-          git push
+                  # Build the Source RPM (SRPM)
+                  rpmbuild --define "_topdir $WORKDIR/rpmbuild" -bs "$WORKDIR/rpmbuild/SPECS/veyon.spec"
+
+                  # Find the generated SRPM file and submit it to Copr
+                  SRPM=$(find "$WORKDIR/rpmbuild/SRPMS" -name '*.src.rpm' -print -quit)
+                  echo "Submitting $SRPM to Copr"
+                  copr-cli build --nowait "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
+            # 6. Commit the updated version record back to the repository
+            - name: Update version record
+              if: steps.cache_check.outputs.new_version_found == 'true'
+              run: |
+                  echo "${{ steps.get_rpm.outputs.version }}" > last_version.txt
+                  git config user.name "github-actions"
+                  git config user.email "actions@github.com"
+                  git fetch origin main --tags
+                  git rebase origin/main
+                  git add last_version.txt
+                  git commit -m "Automated update: Veyon version to ${{ steps.get_rpm.outputs.version }}"
+                  git push
