@@ -6,77 +6,146 @@ on:
   workflow_dispatch: # Allows manual triggering of the workflow
 
 jobs:
-    check-and-deploy:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
+  check-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-            # Fetching the latest release and extracting all Fedora RPMs
-            - name: Get latest Veyon RPM URLs
-              id: get_rpm
-              run: |
-                # Fetching the latest release JSON from GitHub API
-                RELEASE_JSON=$(curl -s https://api.github.com/repos/veyon/veyon/releases/latest)
+      - name: Get latest Veyon release metadata
+        id: get_rpm
+        run: |
+          set -euo pipefail
 
-                # Extracting the versions (eg. v4.10.3.0)
-                VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
-                echo "version=$VERSION" >> $GITHUB_OUTPUT
+          RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/veyon/veyon/releases/latest)
 
-                # Extracting all URLs that have 'fedora' and '.rpm' in their name
-                # We collect the URLs in an array separated with spaces
-                RPM_URLS=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.browser_download_url | test("fedora"; "i") and test("\\.rpm$")) | .browser_download_url' | tr '\n' ' ')
-                echo "rpm_urls=$RPM_URLS" >> $GITHUB_OUTPUT
-            
-            # Check if the version already exists in Copr
-            - name: Check if already processed
-              id: cache_check
-              run: |
-                touch last_version.txt
-                CURRENT_RECORD=$(cat last_version.txt)
+          VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-                if [ "$CURRENT_RECORD" != "${{ steps.get_rpm.outputs.version }}" ]; then
-                        echo "new_version_found=true" >> $GITHUB_OUTPUT
-                    else
-                        echo "new_version_found=false" >> $GITHUB_OUTPUT
-                    fi
-            
-            # Installing Copr CLI
-            - name: Install Copr CLI
-              if: steps.cache_check.outputs.new_version_found == 'true'
-              run: |
-                sudo apt-get update
-                sudo apt-get install -y python3-pip
-                pip3 install copr-cli
+          SOURCE_TARBALL_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("-src\\.tar\\.bz2$")) | .browser_download_url' | head -n 1)
+          SOURCE_VERSION=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("-src\\.tar\\.bz2$")) | .name | capture("veyon-(?<version>[0-9.]+)-src\\.tar\\.bz2").version' | head -n 1)
 
-            # Setting up Copr authentication from Github Secrets
-            - name: Setup Copr Config
-              if: steps.cache_check.outputs.new_version_found == 'true'
-              run: |
-                    mkdir -p ~/.config/
-                    cat <<EOF > ~/.config/copr
-                    [copr-cli]
-                    copr_url = https://copr.fedorainfracloud.org
-                    username = ${{ secrets.COPR_USERNAME }}
-                    login = ${{ secrets.COPR_LOGIN }}
-                    token = ${{ secrets.COPR_TOKEN }}
-                    EOF
-            # Submit all new RPMs to Copr
-            - name: Submit to Copr
-              if: steps.cache_check.outputs.new_version_found == 'true'
-              run: |
-                # We are going through all the RPM URLs and submitting them to Copr
-                for url in ${{ steps.get_rpm.outputs.rpm_urls }}; do
-                    echo "Submitting $url to Copr"
-                    copr-cli build "${{ secrets.COPR_USERNAME }}/eduos-copr" "$url"
-                done
-            
-            # Saving the latest processed version to a file for future reference
-            - name: Update version record
-              if: steps.cache_check.outputs.new_version_found == 'true'
-              run: |
-                echo "${{ steps.get_rpm.outputs.version }}" > last_version.txt
-                git config user.name "github-actions"
-                git config user.email "actions@github.com"
-                git add last_version.txt
-                git commit -m "Auromated update: Veyon version to ${{ steps.get_rpm.outputs.version }}"
-                git push
+          echo "source_tarball_url=$SOURCE_TARBALL_URL" >> "$GITHUB_OUTPUT"
+          echo "source_version=$SOURCE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if already processed
+        id: cache_check
+        run: |
+          touch last_version.txt
+          CURRENT_RECORD=$(cat last_version.txt)
+
+          if [ "$CURRENT_RECORD" != "${{ steps.get_rpm.outputs.version }}" ]; then
+            echo "new_version_found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_version_found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Copr CLI and RPM build tools
+        if: steps.cache_check.outputs.new_version_found == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip rpm
+          pip3 install copr-cli
+
+      - name: Setup Copr Config
+        if: steps.cache_check.outputs.new_version_found == 'true'
+        run: |
+          mkdir -p ~/.config/
+          cat <<EOF > ~/.config/copr
+          [copr-cli]
+          copr_url = https://copr.fedorainfracloud.org
+          username = ${{ secrets.COPR_USERNAME }}
+          login = ${{ secrets.COPR_LOGIN }}
+          token = ${{ secrets.COPR_TOKEN }}
+          EOF
+
+      - name: Build and submit SRPM to Copr
+        if: steps.cache_check.outputs.new_version_found == 'true'
+        run: |
+          set -euo pipefail
+
+          if [ -z "${{ steps.get_rpm.outputs.source_tarball_url }}" ] || [ -z "${{ steps.get_rpm.outputs.source_version }}" ]; then
+            echo "No upstream source tarball was published for this release."
+            exit 1
+          fi
+
+          WORKDIR=$(mktemp -d)
+          trap 'rm -rf "$WORKDIR"' EXIT
+
+          mkdir -p "$WORKDIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+          curl -fsSL -o "$WORKDIR/rpmbuild/SOURCES/veyon-${{ steps.get_rpm.outputs.source_version }}-src.tar.bz2" "${{ steps.get_rpm.outputs.source_tarball_url }}"
+
+          SPEC_PATH="$WORKDIR/rpmbuild/SPECS/veyon.spec" SOURCE_VERSION="${{ steps.get_rpm.outputs.source_version }}" python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import textwrap
+
+          spec_path = Path(os.environ["SPEC_PATH"])
+          source_version = os.environ["SOURCE_VERSION"]
+
+          spec = textwrap.dedent(f"""\
+          Name:           veyon
+          Version:        {source_version}
+          Release:        1%{{?dist}}
+          Summary:        Virtual Eye On Networks classroom management
+          License:        GPL-2.0-only
+          URL:            https://veyon.io
+          Source0:        veyon-{source_version}-src.tar.bz2
+
+          BuildRequires:  cmake
+          BuildRequires:  ninja-build
+          BuildRequires:  gcc-c++
+          BuildRequires:  make
+          BuildRequires:  desktop-file-utils
+          BuildRequires:  systemd-rpm-macros
+          BuildRequires:  polkit-devel
+          BuildRequires:  qca-qt6-devel
+          BuildRequires:  qt6-qtbase-devel
+          BuildRequires:  qt6-qttools-devel
+          BuildRequires:  openssl-devel
+          BuildRequires:  libvncserver-devel
+          BuildRequires:  libjpeg-turbo-devel
+          BuildRequires:  libpng-devel
+          BuildRequires:  lzo-devel
+          BuildRequires:  zlib-devel
+
+          %description
+          Veyon is a free and open source software for monitoring and controlling computers across multiple platforms.
+
+          %prep
+          %autosetup -n veyon-{source_version}
+
+          %build
+          %cmake -G Ninja \
+            -DCMAKE_INSTALL_PREFIX=%{{_prefix}} \
+            -DSYSTEMD_SERVICE_INSTALL_DIR=%{{_unitdir}}
+          %cmake_build
+
+          %install
+          %cmake_install
+          find %{{buildroot}} \( -type f -o -type l \) | sed "s#^%{{buildroot}}##" | sort > filelist.txt
+
+          %files -f filelist.txt
+          %license COPYING
+          %doc INSTALL
+
+          %changelog
+          * Mon Jun 02 2026 GitHub Actions <actions@github.com> - {source_version}-1
+          - Automated build from upstream source tarball
+          """)
+          spec_path.write_text(spec)
+          PY
+
+          rpmbuild --define "_topdir $WORKDIR/rpmbuild" -bs "$WORKDIR/rpmbuild/SPECS/veyon.spec"
+          SRPM=$(find "$WORKDIR/rpmbuild/SRPMS" -name '*.src.rpm' -print -quit)
+          echo "Submitting $SRPM to Copr"
+          copr-cli build "${{ secrets.COPR_USERNAME }}/eduos-copr" "$SRPM"
+
+      - name: Update version record
+        if: steps.cache_check.outputs.new_version_found == 'true'
+        run: |
+          echo "${{ steps.get_rpm.outputs.version }}" > last_version.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add last_version.txt
+          git commit -m "Auromated update: Veyon version to ${{ steps.get_rpm.outputs.version }}"
+          git push
