@@ -15,15 +15,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # 1. Clone the repository WITH ALL SUBMODULES and find the latest release tag
+    # 1. Find the latest release tag directly from remote without cloning
       - name: Get latest Veyon tag
         id: get_rpm
         run: |
           set -euo pipefail
 
-          # Query remote tags, sort them, and grab the latest one
-          LATEST_TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/veyon/veyon.git | head -n 1 | awk -F'/' '{print $3}')
+          # Query remote tags and use sed to gracefully get only the first match
+          LATEST_TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/veyon/veyon.git | sed -n '1p' | awk -F'/' '{print $3}')
           
           # Clean the version number (remove the 'v' prefix if exists)
           VERSION=${LATEST_TAG#v}
